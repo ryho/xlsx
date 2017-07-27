@@ -33,8 +33,6 @@ var (
 	NoCurrentSheetError     = errors.New("No Current Sheet")
 	WrongNumberOfRowsError  = errors.New("Invalid number of cells passed to WriteRow. All calls to WriteRow on the same sheet must have the same number of cells.")
 	AlreadyOnLastSheetError = errors.New("NextSheet() called, but already on last sheet.")
-	UnsupportedCellType     = errors.New("Unsupported cell type")
-	UnknownCellType         = errors.New("Unknown cell type")
 )
 
 // WriteRow will write a row of cells to the current sheet. Every call to WriteRow on the same sheet must contain the
@@ -52,12 +50,17 @@ func (sf *StreamFile) WriteRow(cells []string) error {
 		return err
 	}
 	for colIndex, cellData := range cells {
+		// documentation for the c.t (cell.Type) attribute:
+		// b (Boolean): Cell containing a boolean.
+		// d (Date): Cell contains a date in the ISO 8601 format.
+		// e (Error): Cell containing an error.
+		// inlineStr (Inline String): Cell containing an (inline) rich string, i.e., one not in the shared string table.
+		// If this cell type is used, then the cell value is in the is element rather than the v element in the cell (c element).
+		// n (Number): Cell containing a number.
+		// s (Shared String): Cell containing a shared string.
+		// str (String): Cell containing a formula string.
 		cellCoordinate := xlsx.GetCellIDStringFromCoords(colIndex, sf.currentSheet.rowCount-1)
-		cellType, err := cellTypeString(xlsx.CellTypeInline)
-		if err != nil {
-			return err
-		}
-
+		cellType := "inlineStr"
 		cellOpen := `<c r="` + cellCoordinate + `" t="` + cellType + `"><is><t>`
 		cellClose := `</t></is></c>`
 
@@ -134,42 +137,6 @@ func (sf *StreamFile) Close() error {
 		}
 	}
 	return sf.zipWriter.Close()
-}
-
-// cellTypeString returns the string value that should be used for the cell type.
-// Unsupported or unknown cell types will return an error
-// documentation for the c.t (cell.Type) attribute:
-// b (Boolean): Cell containing a boolean.
-// d (Date): Cell contains a date in the ISO 8601 format.
-// e (Error): Cell containing an error.
-// inlineStr (Inline String): Cell containing an (inline) rich string, i.e., one not in the shared string table.
-// If this cell type is used, then the cell value is in the is element rather than the v element in the cell (c element).
-// n (Number): Cell containing a number.
-// s (Shared String): Cell containing a shared string.
-// str (String): Cell containing a formula string.
-func cellTypeString(enum xlsx.CellType) (string, error) {
-	var cellTypeString string
-	switch enum {
-	case xlsx.CellTypeInline:
-		cellTypeString = "inlineStr"
-	case xlsx.CellTypeString:
-		fallthrough
-	case xlsx.CellTypeFormula:
-		fallthrough
-	case xlsx.CellTypeNumeric:
-		fallthrough
-	case xlsx.CellTypeBool:
-		fallthrough
-	case xlsx.CellTypeError:
-		fallthrough
-	case xlsx.CellTypeDate:
-		fallthrough
-	case xlsx.CellTypeGeneral:
-		return "", UnsupportedCellType
-	default:
-		return "", UnknownCellType
-	}
-	return cellTypeString, nil
 }
 
 // writeSheetStart will write the start of the Sheet's XML as returned from the XMSX library.
