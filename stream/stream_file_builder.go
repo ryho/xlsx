@@ -33,6 +33,7 @@ import (
 	"strings"
 
 	"github.com/tealeg/xlsx"
+	"stash.corp.squareup.com/go/glog.git"
 )
 
 type StreamFileBuilder struct {
@@ -183,8 +184,14 @@ func getSheetIndex(sf *StreamFile, path string) (int, error) {
 func removeDimensionTag(data string, sheet *xlsx.Sheet) (string, error) {
 	x := len(sheet.Cols) - 1
 	y := len(sheet.Rows) - 1
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
 	var dimensionRef string
-	if x < 0 || y < 0 {
+	if x == 0 && y == 0 {
 		dimensionRef = "A1"
 	} else {
 		endCoordinate := xlsx.GetCellIDStringFromCoords(x, y)
@@ -192,6 +199,7 @@ func removeDimensionTag(data string, sheet *xlsx.Sheet) (string, error) {
 	}
 	dataParts := strings.Split(data, fmt.Sprintf(dimensionTag, dimensionRef))
 	if len(dataParts) != 2 {
+		glog.Infof("x %v, y %v, dimensionRef %v, data %v", x, y, dimensionRef, data)
 		return "", errors.New("Unexpected Sheet XML from XLSX library. Dimension tag not found.")
 	}
 	return dataParts[0] + dataParts[1], nil
