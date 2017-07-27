@@ -35,6 +35,18 @@ func TestXlsxStreamWrite(t *testing.T) {
 			},
 		},
 		{
+			testName: "One Column",
+			sheetNames: []string{
+				"Sheet1",
+			},
+			workbookData: [][][]string{
+				{
+					{"Token"},
+					{"123"},
+				},
+			},
+		},
+		{
 			testName: "Several Sheets, with different numbers of columns and rows",
 			sheetNames: []string{
 				"Sheet 1", "Sheet 2", "Sheet3",
@@ -55,6 +67,24 @@ func TestXlsxStreamWrite(t *testing.T) {
 					{"2357", "Margarita", "700"},
 				},
 			},
+		},
+		{
+			testName: "Two Sheets with same the name",
+			sheetNames: []string{
+				"Sheet 1", "Sheet 1",
+			},
+			workbookData: [][][]string{
+				{
+					{"Token", "Name", "Price", "SKU"},
+					{"123", "Taco", "300", "0000000123"},
+				},
+				{
+					{"Token", "Name", "Price", "SKU", "Stock"},
+					{"456", "Salsa", "200", "0346", "1"},
+					{"789", "Burritos", "400", "754", "3"},
+				},
+			},
+			expectedError: fmt.Errorf("duplicate sheet name '%s'.", "Sheet 1"),
 		},
 		{
 			testName: "One Sheet Registered, tries to write to two",
@@ -196,7 +226,7 @@ func TestXlsxStreamWrite(t *testing.T) {
 				buffer = bytes.NewBuffer(nil)
 			}
 			err := writeStreamFile(filePath, buffer, testCase.sheetNames, testCase.workbookData, shouldMakeRealFiles)
-			if err != testCase.expectedError {
+			if err != testCase.expectedError && err.Error() != testCase.expectedError.Error() {
 				t.Fatalf("Error differs from expected error. Error: %v, Expected Error: %v ", err, testCase.expectedError)
 			}
 			if testCase.expectedError != nil {
@@ -302,4 +332,87 @@ func readXLSXFile(t *testing.T, filePath string, fileBuffer io.ReaderAt, size in
 		actualWorkbookData = append(actualWorkbookData, sheetData)
 	}
 	return sheetNames, actualWorkbookData
+}
+
+func TestAddSheetErrorsAfterBuild(t *testing.T) {
+	file := NewStreamFileBuilder(bytes.NewBuffer(nil))
+
+	err := file.AddSheet("Sheet1", []string{"Header"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = file.AddSheet("Sheet2", []string{"Header2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = file.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = file.AddSheet("Sheet3", []string{"Header3"})
+	if err != BuiltExcelStreamBuilderError {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildErrorsAfterBuild(t *testing.T) {
+	file := NewStreamFileBuilder(bytes.NewBuffer(nil))
+
+	err := file.AddSheet("Sheet1", []string{"Header"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = file.AddSheet("Sheet2", []string{"Header2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = file.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = file.Build()
+	if err != BuiltExcelStreamBuilderError {
+		t.Fatal(err)
+	}
+}
+
+func TestCloseWithNothingWrittenToSheets(t *testing.T) {
+	buffer := bytes.NewBuffer(nil)
+	file := NewStreamFileBuilder(buffer)
+
+	sheetNames := []string{"Sheet1", "Sheet2"}
+	workbookData := [][][]string{
+		{{"Header1", "Header2"}},
+		{{"Header3", "Header4"}},
+	}
+	err := file.AddSheet(sheetNames[0], workbookData[0][0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = file.AddSheet(sheetNames[1], workbookData[1][0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stream, err := file.Build()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = stream.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bufReader := bytes.NewReader(buffer.Bytes())
+	size := bufReader.Size()
+
+	actualSheetNames, actualWorkbookData := readXLSXFile(t, "", bufReader, size, false)
+	// check if data was able to be read correctly
+	if !reflect.DeepEqual(actualSheetNames, sheetNames) {
+		t.Fatal("Expected sheet names to be equal")
+	}
+	if !reflect.DeepEqual(actualWorkbookData, workbookData) {
+		t.Fatal("Expected workbook data to be equal")
+	}
 }
