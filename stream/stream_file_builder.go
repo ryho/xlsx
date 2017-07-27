@@ -33,7 +33,6 @@ import (
 	"strings"
 
 	"github.com/tealeg/xlsx"
-	"stash.corp.squareup.com/go/glog.git"
 )
 
 type StreamFileBuilder struct {
@@ -199,7 +198,6 @@ func removeDimensionTag(data string, sheet *xlsx.Sheet) (string, error) {
 	}
 	dataParts := strings.Split(data, fmt.Sprintf(dimensionTag, dimensionRef))
 	if len(dataParts) != 2 {
-		glog.Infof("x %v, y %v, dimensionRef %v, data %v", x, y, dimensionRef, data)
 		return "", errors.New("Unexpected Sheet XML from XLSX library. Dimension tag not found.")
 	}
 	return dataParts[0] + dataParts[1], nil
