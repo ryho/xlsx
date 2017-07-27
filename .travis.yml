@@ -4,11 +4,8 @@ install:
   - go get -d -t -v ./... && go build -v ./...
 
 go:
-  - 1.7
-  - 1.8
-  - stable
-  - master
-  - tip
+  - 1.7.6
+  - 1.8.3
 
 script:
   - go vet ./...
