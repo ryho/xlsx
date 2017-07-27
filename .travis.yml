@@ -12,7 +12,8 @@ go:
 
 script:
   - go vet ./...
-  - go test -v -coverprofile=coverage.txt -covermode=atomic ./...
+  - go test -v -coverprofile=coverage.txt -covermode=atomic .
+  - go test -v -coverprofile=stream/coverage.txt -covermode=atomic ./stream
 
 after_success:
   - bash <(curl -s https://codecov.io/bash)
