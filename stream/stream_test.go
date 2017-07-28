@@ -232,7 +232,7 @@ func TestXlsxStreamWrite(t *testing.T) {
 			if testCase.expectedError != nil {
 				return
 			}
-			// read the file back with a 3rd party library
+			// read the file back with the xlsx package
 			var bufReader *bytes.Reader
 			var size int64
 			if !shouldMakeRealFiles {
@@ -251,7 +251,7 @@ func TestXlsxStreamWrite(t *testing.T) {
 	}
 }
 
-// writeStreamFile will write the file using the stream package
+// writeStreamFile will write the file using this stream package
 func writeStreamFile(filePath string, fileBuffer io.Writer, sheetNames []string, workbookData [][][]string, shouldMakeRealFiles bool) error {
 	var file *StreamFileBuilder
 	var err error
@@ -298,7 +298,7 @@ func writeStreamFile(filePath string, fileBuffer io.Writer, sheetNames []string,
 	return nil
 }
 
-// readXLSXFile will read the file using normal xlsx package.
+// readXLSXFile will read the file using the xlsx package.
 func readXLSXFile(t *testing.T, filePath string, fileBuffer io.ReaderAt, size int64, shouldMakeRealFiles bool) ([]string, [][][]string) {
 	var readFile *xlsx.File
 	var err error
