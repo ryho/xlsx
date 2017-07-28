@@ -1,4 +1,4 @@
-package excel_stream
+package stream
 
 import (
 	"bytes"
@@ -251,7 +251,7 @@ func TestXlsxStreamWrite(t *testing.T) {
 	}
 }
 
-// writeStreamFile will write the file using the Excel Stream library
+// writeStreamFile will write the file using the stream package
 func writeStreamFile(filePath string, fileBuffer io.Writer, sheetNames []string, workbookData [][][]string, shouldMakeRealFiles bool) error {
 	var file *StreamFileBuilder
 	var err error
@@ -270,13 +270,13 @@ func writeStreamFile(filePath string, fileBuffer io.Writer, sheetNames []string,
 			return err
 		}
 	}
-	excelStream, err := file.Build()
+	streamFile, err := file.Build()
 	if err != nil {
 		return err
 	}
 	for i, sheetData := range workbookData {
 		if i != 0 {
-			err = excelStream.NextSheet()
+			err = streamFile.NextSheet()
 			if err != nil {
 				return err
 			}
@@ -285,20 +285,20 @@ func writeStreamFile(filePath string, fileBuffer io.Writer, sheetNames []string,
 			if i == 0 {
 				continue
 			}
-			err = excelStream.WriteRow(row)
+			err = streamFile.WriteRow(row)
 			if err != nil {
 				return err
 			}
 		}
 	}
-	err = excelStream.Close()
+	err = streamFile.Close()
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-// readXLSXFile will read the file using the imported library github.com/tealeg/xlsx so that the written file can be checked.
+// readXLSXFile will read the file using normal xlsx package.
 func readXLSXFile(t *testing.T, filePath string, fileBuffer io.ReaderAt, size int64, shouldMakeRealFiles bool) ([]string, [][][]string) {
 	var readFile *xlsx.File
 	var err error
@@ -351,7 +351,7 @@ func TestAddSheetErrorsAfterBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = file.AddSheet("Sheet3", []string{"Header3"})
-	if err != BuiltExcelStreamBuilderError {
+	if err != BuiltStreamFileBuilderError {
 		t.Fatal(err)
 	}
 }
@@ -373,7 +373,7 @@ func TestBuildErrorsAfterBuild(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = file.Build()
-	if err != BuiltExcelStreamBuilderError {
+	if err != BuiltStreamFileBuilderError {
 		t.Fatal(err)
 	}
 }
