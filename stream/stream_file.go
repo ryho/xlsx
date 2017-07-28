@@ -1,4 +1,4 @@
-package excel_stream
+package stream
 
 import (
 	"archive/zip"
@@ -19,7 +19,7 @@ type StreamFile struct {
 }
 
 type streamSheet struct {
-	// sheetIndex is the Excel sheet index, which starts at 1
+	// sheetIndex is the XLSX sheet index, which starts at 1
 	index int
 	// The number of rows that have been written to the sheet so far
 	rowCount int
@@ -105,7 +105,7 @@ func (sf *StreamFile) NextSheet() error {
 	// Store here.
 	// Deflate is one of the compression algorithms that .zip supports. Golang's implementation of Deflate will keep
 	// everything passed to Write() and will only pass it down when Close() is called. Using this would prevent this
-	// library from streaming with in an Excel sheet.
+	// library from streaming with in an XLSX sheet.
 	// Store uses no compression and is just a no-op wrapper. Using this will allow data passed to WriteRow to get written
 	// and then immediately flushed out to the network.
 	fileWriter, err := sf.zipWriter.CreateHeader(&zip.FileHeader{Name: sheetPath, Method: zip.Store})
@@ -139,7 +139,7 @@ func (sf *StreamFile) Close() error {
 	return sf.zipWriter.Close()
 }
 
-// writeSheetStart will write the start of the Sheet's XML as returned from the XMSX library.
+// writeSheetStart will write the start of the Sheet's XML as returned from the xlsx package.
 func (sf *StreamFile) writeSheetStart() error {
 	if sf.currentSheet == nil {
 		return NoCurrentSheetError
@@ -147,7 +147,7 @@ func (sf *StreamFile) writeSheetStart() error {
 	return sf.currentSheet.write(sf.sheetXmlPrefix[sf.currentSheet.index-1])
 }
 
-// writeSheetEnd will write the end of the Sheet's XML as returned from the XMSX library.
+// writeSheetEnd will write the end of the Sheet's XML as returned from the xlsx package.
 func (sf *StreamFile) writeSheetEnd() error {
 	if sf.currentSheet == nil {
 		return NoCurrentSheetError
