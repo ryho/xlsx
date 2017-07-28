@@ -1,7 +1,6 @@
 // Authors: Ryan Hollis (ryanh@)
 
-// The purpose of the StreamFile library is to allow streamed writing of XLSX files.
-// It relies heavily on the XLSX library (github.com/tealeg/xlsx).
+// The purpose of the stream package is to allow streamed writing of XLSX files.
 // Directions:
 // 1. Create a StreamFileBuilder with NewStreamFileBuilder() or NewStreamFileBuilderForPath().
 // 2. Add the sheets and their first row of data by calling AddSheet().
@@ -15,13 +14,13 @@
 // Future work suggestions:
 // Currently the only supported cell type is string, since the main reason this library was written was to prevent
 // strings from being interpreted as numbers. It would be nice to have support for numbers and money so that the exported
-// files could better take advantage of Excel's features.
+// files could better take advantage of XLSX's features.
 // All text is written with the same text style. Support for additional text styles could be added to highlight certain
 // data in the file.
 // The current default style uses fonts that are not on Macs by default so opening the XLSX files in Numbers causes a
 // pop up that says there are missing fonts. The font could be changed to something that is usually found on Mac and PC.
 
-package excel_stream
+package stream
 
 import (
 	"archive/zip"
@@ -48,9 +47,9 @@ const (
 	dimensionTag        = `<dimension ref="%s"></dimension>`
 )
 
-var BuiltExcelStreamBuilderError = errors.New("StreamFileBuilder has already been built, functions may no longer be used")
+var BuiltStreamFileBuilderError = errors.New("StreamFileBuilder has already been built, functions may no longer be used")
 
-// NewExcelBuilder creates an StreamFileBuilder that will write to the the provided io.writer
+// NewStreamFileBuilder creates an StreamFileBuilder that will write to the the provided io.writer
 func NewStreamFileBuilder(writer io.Writer) *StreamFileBuilder {
 	return &StreamFileBuilder{
 		zipWriter: zip.NewWriter(writer),
@@ -58,7 +57,7 @@ func NewStreamFileBuilder(writer io.Writer) *StreamFileBuilder {
 	}
 }
 
-// NewExcelBuilderForFile takes the name of an XLSX file and returns a builder for it.
+// NewStreamFileBuilderForPath takes the name of an XLSX file and returns a builder for it.
 // The file will be created if it does not exist, or truncated if it does.
 func NewStreamFileBuilderForPath(path string) (*StreamFileBuilder, error) {
 	file, err := os.Create(path)
@@ -73,7 +72,7 @@ func NewStreamFileBuilderForPath(path string) (*StreamFileBuilder, error) {
 // error will be thrown.
 func (sb *StreamFileBuilder) AddSheet(name string, headers []string) error {
 	if sb.built {
-		return BuiltExcelStreamBuilderError
+		return BuiltStreamFileBuilderError
 	}
 	sheet, err := sb.xlsxFile.AddSheet(name)
 	if err != nil {
@@ -90,11 +89,11 @@ func (sb *StreamFileBuilder) AddSheet(name string, headers []string) error {
 	return nil
 }
 
-// Build begins streaming the XLSX file to the io, by writing all the Excel metadata. It creates a StreamFile struct
+// Build begins streaming the XLSX file to the io, by writing all the XLSX metadata. It creates a StreamFile struct
 // that can be used to write the rows to the sheets.
 func (sb *StreamFileBuilder) Build() (*StreamFile, error) {
 	if sb.built {
-		return nil, BuiltExcelStreamBuilderError
+		return nil, BuiltStreamFileBuilderError
 	}
 	sb.built = true
 	parts, err := sb.xlsxFile.MarshallParts()
@@ -108,7 +107,7 @@ func (sb *StreamFileBuilder) Build() (*StreamFile, error) {
 		sheetXmlSuffix: make([]string, len(sb.xlsxFile.Sheets)),
 	}
 	for path, data := range parts {
-		// If the part is a sheet, don't write it yet. We only want to write the Excel metadata files, since at this
+		// If the part is a sheet, don't write it yet. We only want to write the XLSX metadata files, since at this
 		// point the sheets are still empty. The sheet files will be written later as their rows come in.
 		if strings.HasPrefix(path, sheetFilePathPrefix) {
 			if err := sb.processEmptySheetXML(es, path, data); err != nil {
@@ -158,25 +157,25 @@ func (sb *StreamFileBuilder) processEmptySheetXML(sf *StreamFile, path, data str
 	return nil
 }
 
-// getSheetIndex parses the path to the Excel sheet data and returns the index
+// getSheetIndex parses the path to the XLSX sheet data and returns the index
 // The files that store the data for each sheet must have the format:
 // xl/worksheets/sheet123.xml
 // where 123 is the index of the sheet. This file path format is part of the XLSX file standard.
 func getSheetIndex(sf *StreamFile, path string) (int, error) {
 	indexString := path[len(sheetFilePathPrefix) : len(path)-len(sheetFilePathSuffix)]
-	sheetExcelIndex, err := strconv.Atoi(indexString)
+	sheetXLSXIndex, err := strconv.Atoi(indexString)
 	if err != nil {
-		return -1, errors.New("Unexpected sheet file name from XLSX library")
+		return -1, errors.New("Unexpected sheet file name from xlsx package")
 	}
-	if sheetExcelIndex < 1 || len(sf.sheetXmlPrefix) < sheetExcelIndex ||
-		len(sf.sheetXmlSuffix) < sheetExcelIndex || len(sf.xlsxFile.Sheets) < sheetExcelIndex {
+	if sheetXLSXIndex < 1 || len(sf.sheetXmlPrefix) < sheetXLSXIndex ||
+		len(sf.sheetXmlSuffix) < sheetXLSXIndex || len(sf.xlsxFile.Sheets) < sheetXLSXIndex {
 		return -1, errors.New("Unexpected sheet index")
 	}
-	sheetArrayIndex := sheetExcelIndex - 1
+	sheetArrayIndex := sheetXLSXIndex - 1
 	return sheetArrayIndex, nil
 }
 
-// removeDimensionTag will return the passed in Excel Spreadsheet XML with the dimension tag removed.
+// removeDimensionTag will return the passed in XLSX Spreadsheet XML with the dimension tag removed.
 // data is the XML data for the sheet
 // sheet is the xlsx.Sheet struct that the XML was created from.
 // Can return an error if the XML's dimension tag does not match was is expected based on the provided Sheet
@@ -198,18 +197,18 @@ func removeDimensionTag(data string, sheet *xlsx.Sheet) (string, error) {
 	}
 	dataParts := strings.Split(data, fmt.Sprintf(dimensionTag, dimensionRef))
 	if len(dataParts) != 2 {
-		return "", errors.New("Unexpected Sheet XML from XLSX library. Dimension tag not found.")
+		return "", errors.New("Unexpected Sheet XML from xlsx package. Dimension tag not found.")
 	}
 	return dataParts[0] + dataParts[1], nil
 }
 
 // splitSheetIntoPrefixAndSuffix will split the provided XML sheet into a prefix and a suffix so that
-// more Excel rows can be inserted in between.
+// more spreadsheet rows can be inserted in between.
 func splitSheetIntoPrefixAndSuffix(data string) (string, string, error) {
 	// Split the sheet at the end of its SheetData tag so that more rows can be added inside.
 	sheetParts := strings.Split(data, endSheetDataTag)
 	if len(sheetParts) != 2 {
-		return "", "", errors.New("Unexpected Sheet XML from XLSX library. SheetData close tag not found.")
+		return "", "", errors.New("Unexpected Sheet XML from xlsx package. SheetData close tag not found.")
 	}
 	return sheetParts[0], sheetParts[1], nil
 }
