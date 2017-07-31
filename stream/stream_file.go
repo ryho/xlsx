@@ -16,6 +16,7 @@ type StreamFile struct {
 	sheetXmlSuffix []string
 	zipWriter      *zip.Writer
 	currentSheet   *streamSheet
+	err            error
 }
 
 type streamSheet struct {
@@ -31,14 +32,40 @@ type streamSheet struct {
 
 var (
 	NoCurrentSheetError     = errors.New("No Current Sheet")
-	WrongNumberOfRowsError  = errors.New("Invalid number of cells passed to WriteRow. All calls to WriteRow on the same sheet must have the same number of cells.")
+	WrongNumberOfRowsError  = errors.New("Invalid number of cells passed to Write. All calls to Write on the same sheet must have the same number of cells.")
 	AlreadyOnLastSheetError = errors.New("NextSheet() called, but already on last sheet.")
 )
 
-// WriteRow will write a row of cells to the current sheet. Every call to WriteRow on the same sheet must contain the
+// Write will write a row of cells to the current sheet. Every call to Write on the same sheet must contain the
 // same number of cells as the header provided when the sheet was created or an error will be returned. This function
 // will always trigger a flush on success. Currently the only supported data type is string data.
-func (sf *StreamFile) WriteRow(cells []string) error {
+func (sf *StreamFile) Write(cells []string) error {
+	if sf.err != nil {
+		return sf.err
+	}
+	err := sf.write(cells)
+	if err != nil {
+		sf.err = err
+		return err
+	}
+	return sf.zipWriter.Flush()
+}
+
+func (sf *StreamFile) WriteAll(records [][]string) error {
+	if sf.err != nil {
+		return sf.err
+	}
+	for _, row := range records {
+		err := sf.write(row)
+		if err != nil {
+			sf.err = err
+			return err
+		}
+	}
+	return sf.zipWriter.Flush()
+}
+
+func (sf *StreamFile) write(cells []string) error {
 	if sf.currentSheet == nil {
 		return NoCurrentSheetError
 	}
@@ -80,16 +107,32 @@ func (sf *StreamFile) WriteRow(cells []string) error {
 	return sf.zipWriter.Flush()
 }
 
+// Error reports any error that has occurred during a previous Write or Flush.
+func (sf *StreamFile) Error() error {
+	return sf.err
+}
+
+func (sf *StreamFile) Flush() {
+	if sf.err != nil {
+		sf.err = sf.zipWriter.Flush()
+	}
+}
+
 // NextSheet will switch to the next sheet. Sheets are selected in the same order they were added.
 // Once you leave a sheet, you cannot return to it.
 func (sf *StreamFile) NextSheet() error {
+	if sf.err != nil {
+		return sf.err
+	}
 	var sheetIndex int
 	if sf.currentSheet != nil {
 		if sf.currentSheet.index >= len(sf.xlsxFile.Sheets) {
+			sf.err = AlreadyOnLastSheetError
 			return AlreadyOnLastSheetError
 		}
 		if err := sf.writeSheetEnd(); err != nil {
 			sf.currentSheet = nil
+			sf.err = err
 			return err
 		}
 		sheetIndex = sf.currentSheet.index
@@ -106,15 +149,17 @@ func (sf *StreamFile) NextSheet() error {
 	// Deflate is one of the compression algorithms that .zip supports. Golang's implementation of Deflate will keep
 	// everything passed to Write() and will only pass it down when Close() is called. Using this would prevent this
 	// library from streaming with in an XLSX sheet.
-	// Store uses no compression and is just a no-op wrapper. Using this will allow data passed to WriteRow to get written
+	// Store uses no compression and is just a no-op wrapper. Using this will allow data passed to Write to get written
 	// and then immediately flushed out to the network.
 	fileWriter, err := sf.zipWriter.CreateHeader(&zip.FileHeader{Name: sheetPath, Method: zip.Store})
 	if err != nil {
+		sf.err = err
 		return err
 	}
 	sf.currentSheet.writer = fileWriter
 
 	if err := sf.writeSheetStart(); err != nil {
+		sf.err = err
 		return err
 	}
 	return nil
@@ -123,20 +168,29 @@ func (sf *StreamFile) NextSheet() error {
 // Close closes the Stream File.
 // Any sheets that have not yet been written to will have an empty sheet created for them.
 func (sf *StreamFile) Close() error {
+	if sf.err != nil {
+		return sf.err
+	}
 	// If there are sheets that have not been written yet, call NextSheet() which will add files to the zip for them.
 	// XLSX readers may error if the sheets registered in the metadata are not present in the file.
 	if sf.currentSheet != nil {
 		for sf.currentSheet.index < len(sf.xlsxFile.Sheets) {
 			if err := sf.NextSheet(); err != nil {
+				sf.err = err
 				return err
 			}
 		}
 		// Write the end of the last sheet.
 		if err := sf.writeSheetEnd(); err != nil {
+			sf.err = err
 			return err
 		}
 	}
-	return sf.zipWriter.Close()
+	err := sf.zipWriter.Close()
+	if err != nil {
+		sf.err = err
+	}
+	return err
 }
 
 // writeSheetStart will write the start of the Sheet's XML as returned from the xlsx package.
