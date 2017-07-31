@@ -5,7 +5,7 @@
 // 1. Create a StreamFileBuilder with NewStreamFileBuilder() or NewStreamFileBuilderForPath().
 // 2. Add the sheets and their first row of data by calling AddSheet().
 // 3. Call Build() to get a StreamFile. Once built, all functions on the builder will return an error.
-// 4. Write to the StreamFile with WriteRow(). Writes begin on the first sheet. New rows are always written and flushed
+// 4. Write to the StreamFile with Write(). Writes begin on the first sheet. New rows are always written and flushed
 // to the io. All rows written to the same sheet must have the same number of cells as the header provided when the sheet
 // was created or an error will be returned.
 // 5. Call NextSheet() to proceed to the next sheet. Once NextSheet() is called, the previous sheet can not be edited.
@@ -168,7 +168,7 @@ func getSheetIndex(sf *StreamFile, path string) (int, error) {
 		return -1, errors.New("Unexpected sheet file name from xlsx package")
 	}
 	if sheetXLSXIndex < 1 || len(sf.sheetXmlPrefix) < sheetXLSXIndex ||
-		len(sf.sheetXmlSuffix) < sheetXLSXIndex || len(sf.xlsxFile.Sheets) < sheetXLSXIndex {
+			len(sf.sheetXmlSuffix) < sheetXLSXIndex || len(sf.xlsxFile.Sheets) < sheetXLSXIndex {
 		return -1, errors.New("Unexpected sheet index")
 	}
 	sheetArrayIndex := sheetXLSXIndex - 1
