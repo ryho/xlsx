@@ -285,7 +285,7 @@ func writeStreamFile(filePath string, fileBuffer io.Writer, sheetNames []string,
 			if i == 0 {
 				continue
 			}
-			err = streamFile.WriteRow(row)
+			err = streamFile.Write(row)
 			if err != nil {
 				return err
 			}
