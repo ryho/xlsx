@@ -1,4 +1,4 @@
-package stream
+package xlsx
 
 import (
 	"bytes"
@@ -6,20 +6,28 @@ import (
 	"io"
 	"reflect"
 	"testing"
-
-	"github.com/tealeg/xlsx"
 )
+
+const (
+	TestsShouldMakeRealFiles = true
+)
+
+func TestTestsShouldMakeRealFilesShouldBeFalse(t *testing.T) {
+	if TestsShouldMakeRealFiles {
+		t.Fatal("TestsShouldMakeRealFiles should only be true for local debugging. Don't forget to switch back before commiting.")
+	}
+}
 
 func TestXlsxStreamWrite(t *testing.T) {
 	// When shouldMakeRealFiles is set to true this test will make actual XLSX files in the file system.
 	// This is useful to ensure files open in Excel, Numbers, Google Docs, etc.
 	// In case of issues you can use "Open XML SDK 2.5" to diagnose issues in generated XLSX files:
 	// https://www.microsoft.com/en-us/download/details.aspx?id=30425
-	shouldMakeRealFiles := false
 	testCases := []struct {
 		testName      string
 		sheetNames    []string
 		workbookData  [][][]string
+		expectedWorkbookData  [][][]string
 		expectedError error
 	}{
 		{
@@ -31,6 +39,26 @@ func TestXlsxStreamWrite(t *testing.T) {
 				{
 					{"Token", "Name", "Price", "SKU"},
 					{"123", "Taco", "300", "0000000123"},
+				},
+			},
+		},
+		{
+			testName: "One Sheet with empty string cells: they get omitted",
+			sheetNames: []string{
+				"Sheet1",
+			},
+			workbookData: [][][]string{
+				{
+					{"Token", "Name", "Price", "SKU"},
+					{"123", "Taco", "300", "0000000123"},
+					{"456", "Salsa", "", ""},
+				},
+			},
+			expectedWorkbookData: [][][]string{
+				{
+					{"Token", "Name", "Price", "SKU"},
+					{"123", "Taco", "300", "0000000123"},
+					{"456", "Salsa"},
 				},
 			},
 		},
@@ -203,7 +231,7 @@ func TestXlsxStreamWrite(t *testing.T) {
 				{
 					// String courtesy of https://github.com/minimaxir/big-list-of-naughty-strings/
 					// Header row contains the tags that I am filtering on
-					{"Token", endSheetDataTag, "Price", fmt.Sprintf(dimensionTag, "A1:D1")},
+					{"Token", endSheetDataTag, "Price", "asdf"},
 					// Japanese and emojis
 					{"123", "パーティーへ行かないか", "300", "🍕🐵 🙈 🙉 🙊"},
 					// XML encoder/parser test strings
@@ -220,12 +248,12 @@ func TestXlsxStreamWrite(t *testing.T) {
 		t.Run(testCase.testName, func(t *testing.T) {
 			var filePath string
 			var buffer *bytes.Buffer
-			if shouldMakeRealFiles {
+			if TestsShouldMakeRealFiles {
 				filePath = fmt.Sprintf("Workbook%d.xlsx", i)
 			} else {
 				buffer = bytes.NewBuffer(nil)
 			}
-			err := writeStreamFile(filePath, buffer, testCase.sheetNames, testCase.workbookData, shouldMakeRealFiles)
+			err := writeStreamFile(filePath, buffer, testCase.sheetNames, testCase.workbookData, TestsShouldMakeRealFiles)
 			if err != testCase.expectedError && err.Error() != testCase.expectedError.Error() {
 				t.Fatalf("Error differs from expected error. Error: %v, Expected Error: %v ", err, testCase.expectedError)
 			}
@@ -235,16 +263,19 @@ func TestXlsxStreamWrite(t *testing.T) {
 			// read the file back with the xlsx package
 			var bufReader *bytes.Reader
 			var size int64
-			if !shouldMakeRealFiles {
+			if !TestsShouldMakeRealFiles {
 				bufReader = bytes.NewReader(buffer.Bytes())
 				size = bufReader.Size()
 			}
-			actualSheetNames, actualWorkbookData := readXLSXFile(t, filePath, bufReader, size, shouldMakeRealFiles)
+			actualSheetNames, actualWorkbookData := readXLSXFile(t, filePath, bufReader, size, TestsShouldMakeRealFiles)
 			// check if data was able to be read correctly
 			if !reflect.DeepEqual(actualSheetNames, testCase.sheetNames) {
 				t.Fatal("Expected sheet names to be equal")
 			}
-			if !reflect.DeepEqual(actualWorkbookData, testCase.workbookData) {
+			if testCase.expectedWorkbookData == nil {
+				testCase.expectedWorkbookData = testCase.workbookData
+			}
+			if !reflect.DeepEqual(actualWorkbookData, testCase.expectedWorkbookData) {
 				t.Fatal("Expected workbook data to be equal")
 			}
 		})
@@ -298,17 +329,17 @@ func writeStreamFile(filePath string, fileBuffer io.Writer, sheetNames []string,
 	return nil
 }
 
-// readXLSXFile will read the file using the xlsx package.
+// readXLSXFile will read the file back.
 func readXLSXFile(t *testing.T, filePath string, fileBuffer io.ReaderAt, size int64, shouldMakeRealFiles bool) ([]string, [][][]string) {
-	var readFile *xlsx.File
+	var readFile *File
 	var err error
 	if shouldMakeRealFiles {
-		readFile, err = xlsx.OpenFile(filePath)
+		readFile, err = OpenFile(filePath)
 		if err != nil {
 			t.Fatal(err)
 		}
 	} else {
-		readFile, err = xlsx.OpenReaderAt(fileBuffer, size)
+		readFile, err = OpenReaderAt(fileBuffer, size)
 		if err != nil {
 			t.Fatal(err)
 		}

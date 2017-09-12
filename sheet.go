@@ -8,17 +8,18 @@ import (
 // Sheet is a high level structure intended to provide user access to
 // the contents of a particular sheet within an XLSX file.
 type Sheet struct {
-	Name        string
-	File        *File
-	Rows        []*Row
-	Cols        []*Col
-	MaxRow      int
-	MaxCol      int
-	Hidden      bool
-	Selected    bool
-	SheetViews  []SheetView
-	SheetFormat SheetFormat
-	AutoFilter  *AutoFilter
+	Name          string
+	File          *File
+	Rows          []*Row
+	Cols          []*Col
+	MaxRow        int
+	MaxCol        int
+	Hidden        bool
+	Selected      bool
+	omitDimension bool
+	SheetViews    []SheetView
+	SheetFormat   SheetFormat
+	AutoFilter    *AutoFilter
 }
 
 type SheetView struct {
@@ -184,8 +185,6 @@ func (s *Sheet) handleMerged() {
 func (s *Sheet) makeXLSXSheet(refTable *RefTable, styles *xlsxStyleSheet) *xlsxWorksheet {
 	worksheet := newXlsxWorksheet()
 	xSheet := xlsxSheetData{}
-	maxRow := 0
-	maxCell := 0
 	var maxLevelCol, maxLevelRow uint8
 
 	// Scan through the sheet and see if there are any merged cells. If there
@@ -215,9 +214,8 @@ func (s *Sheet) makeXLSXSheet(refTable *RefTable, styles *xlsxStyleSheet) *xlsxW
 	}
 	worksheet.SheetFormatPr.DefaultColWidth = s.SheetFormat.DefaultColWidth
 
-	colsXfIdList := make([]int, len(s.Cols))
 	worksheet.Cols = &xlsxCols{Col: []xlsxCol{}}
-	for c, col := range s.Cols {
+	for _, col := range s.Cols {
 		XfId := 0
 		if col.Min == 0 {
 			col.Min = 1
@@ -231,7 +229,6 @@ func (s *Sheet) makeXLSXSheet(refTable *RefTable, styles *xlsxStyleSheet) *xlsxW
 			xNumFmt := styles.newNumFmt(col.numFmt)
 			XfId = handleStyleForXLSX(style, xNumFmt.NumFmtId, styles)
 		}
-		colsXfIdList[c] = XfId
 
 		var customWidth bool
 		if col.Width == 0 {
@@ -258,84 +255,10 @@ func (s *Sheet) makeXLSXSheet(refTable *RefTable, styles *xlsxStyleSheet) *xlsxW
 	}
 
 	for r, row := range s.Rows {
-		if r > maxRow {
-			maxRow = r
-		}
-		xRow := xlsxRow{}
-		xRow.R = r + 1
-		if row.isCustom {
-			xRow.CustomHeight = true
-			xRow.Ht = fmt.Sprintf("%g", row.Height)
-		}
-		xRow.OutlineLevel = row.OutlineLevel
 		if row.OutlineLevel > maxLevelRow {
 			maxLevelRow = row.OutlineLevel
 		}
-		for c, cell := range row.Cells {
-			XfId := colsXfIdList[c]
-
-			// generate NumFmtId and add new NumFmt
-			xNumFmt := styles.newNumFmt(cell.NumFmt)
-
-			style := cell.style
-			if style != nil {
-				XfId = handleStyleForXLSX(style, xNumFmt.NumFmtId, styles)
-			} else if len(cell.NumFmt) > 0 && s.Cols[c].numFmt != cell.NumFmt {
-				XfId = handleNumFmtIdForXLSX(xNumFmt.NumFmtId, styles)
-			}
-
-			if c > maxCell {
-				maxCell = c
-			}
-			xC := xlsxC{}
-			xC.R = fmt.Sprintf("%s%d", numericToLetters(c), r+1)
-			switch cell.cellType {
-			case CellTypeString:
-				if len(cell.Value) > 0 {
-					xC.V = strconv.Itoa(refTable.AddString(cell.Value))
-				}
-				xC.T = "s"
-				xC.S = XfId
-			case CellTypeBool:
-				xC.V = cell.Value
-				xC.T = "b"
-				xC.S = XfId
-			case CellTypeNumeric:
-				xC.V = cell.Value
-				xC.S = XfId
-			case CellTypeDate:
-				xC.V = cell.Value
-				xC.S = XfId
-			case CellTypeFormula:
-				xC.V = cell.Value
-				xC.F = &xlsxF{Content: cell.formula}
-				xC.S = XfId
-			case CellTypeError:
-				xC.V = cell.Value
-				xC.F = &xlsxF{Content: cell.formula}
-				xC.T = "e"
-				xC.S = XfId
-			case CellTypeGeneral:
-				xC.V = cell.Value
-				xC.S = XfId
-			}
-
-			xRow.C = append(xRow.C, xC)
-
-			if cell.HMerge > 0 || cell.VMerge > 0 {
-				// r == rownum, c == colnum
-				mc := xlsxMergeCell{}
-				start := fmt.Sprintf("%s%d", numericToLetters(c), r+1)
-				endcol := c + cell.HMerge
-				endrow := r + cell.VMerge + 1
-				end := fmt.Sprintf("%s%d", numericToLetters(endcol), endrow)
-				mc.Ref = start + ":" + end
-				if worksheet.MergeCells == nil {
-					worksheet.MergeCells = &xlsxMergeCells{}
-				}
-				worksheet.MergeCells.Cells = append(worksheet.MergeCells.Cells, mc)
-			}
-		}
+		xRow := makeXLSXRow(r, row, refTable, styles, s, worksheet)
 		xSheet.Row = append(xSheet.Row, xRow)
 	}
 
@@ -355,14 +278,116 @@ func (s *Sheet) makeXLSXSheet(refTable *RefTable, styles *xlsxStyleSheet) *xlsxW
 	}
 
 	worksheet.SheetData = xSheet
-	dimension := xlsxDimension{}
-	dimension.Ref = fmt.Sprintf("A1:%s%d",
-		numericToLetters(maxCell), maxRow+1)
-	if dimension.Ref == "A1:A1" {
-		dimension.Ref = "A1"
+	// We omit the dimension when performing streaming writes since the actual length is not known.
+	if !s.omitDimension {
+		dimension := xlsxDimension{}
+		dimension.Ref = fmt.Sprintf("A1:%s%d",
+			numericToLetters(len(s.Cols)-1), len(s.Rows))
+		if dimension.Ref == "A1:A1" {
+			dimension.Ref = "A1"
+		}
+		worksheet.Dimension = dimension
 	}
-	worksheet.Dimension = dimension
 	return worksheet
+}
+
+// makeXLSXRow turns a Row into an xlsxRow.
+func makeXLSXRow(r int, row *Row, refTable *RefTable, styles *xlsxStyleSheet, s *Sheet, worksheet *xlsxWorksheet) xlsxRow {
+	return makeXLSXRowInternal(r, row, refTable, styles, s, worksheet, false)
+}
+
+// makeXLSXRowForStreaming does not support any features that would require creating additional styles or editing the
+// metadata at the beginning of the sheet, such as Merge cells.
+// However, it does support modifications to the shared string ref table, because during streaming this file will be
+// written at the end.
+// If desired it would be possible to allow updates to styles by writing the style file at the end of streaming.
+// It would also be possible to support merge cells by having them be registered ahead of time on the StreamFileBuilder.
+func makeXLSXRowForStreaming(r int, row *Row, refTable *RefTable) xlsxRow {
+	return makeXLSXRowInternal(r, row, refTable, nil, nil, nil, true)
+}
+
+func makeXLSXRowInternal(r int, row *Row, refTable *RefTable, styles *xlsxStyleSheet, s *Sheet, worksheet *xlsxWorksheet, makeRowForStreaming bool) xlsxRow {
+	xRow := xlsxRow{}
+	xRow.R = r + 1
+	if row.isCustom {
+		xRow.CustomHeight = true
+		xRow.Ht = fmt.Sprintf("%g", row.Height)
+	}
+	xRow.OutlineLevel = row.OutlineLevel
+	for c, cell := range row.Cells {
+		var XfId int
+		if !makeRowForStreaming {
+			XfId = worksheet.Cols.Col[c].Style
+		}
+
+		// Note: is it desirable to error if cells have NumFmt data or style that differs from the column
+		// during streaming instead of ignoring?
+		if !makeRowForStreaming {
+			// generate NumFmtId and add new NumFmt
+			xNumFmt := styles.newNumFmt(cell.NumFmt)
+
+			style := cell.style
+			if style != nil {
+				XfId = handleStyleForXLSX(style, xNumFmt.NumFmtId, styles)
+			} else if len(cell.NumFmt) > 0 && s.Cols[c].numFmt != cell.NumFmt {
+				XfId = handleNumFmtIdForXLSX(xNumFmt.NumFmtId, styles)
+			}
+		}
+
+		xC := xlsxC{}
+		xC.R = fmt.Sprintf("%s%d", numericToLetters(c), r+1)
+		switch cell.cellType {
+		case CellTypeString:
+			if len(cell.Value) == 0 {
+				continue
+			}
+			xC.V = strconv.Itoa(refTable.AddString(cell.Value))
+			xC.T = "s"
+			xC.S = XfId
+		case CellTypeBool:
+			xC.V = cell.Value
+			xC.T = "b"
+			xC.S = XfId
+		case CellTypeNumeric:
+			xC.V = cell.Value
+			xC.S = XfId
+		case CellTypeDate:
+			xC.V = cell.Value
+			xC.S = XfId
+		case CellTypeFormula:
+			xC.V = cell.Value
+			xC.F = &xlsxF{Content: cell.formula}
+			xC.S = XfId
+		case CellTypeError:
+			xC.V = cell.Value
+			xC.F = &xlsxF{Content: cell.formula}
+			xC.T = "e"
+			xC.S = XfId
+		case CellTypeGeneral:
+			xC.V = cell.Value
+			xC.S = XfId
+		}
+
+		xRow.C = append(xRow.C, xC)
+
+		if !makeRowForStreaming {
+			// Note: is it desirable to error if cells have merge data during streaming instead of ignoring?
+			if cell.HMerge > 0 || cell.VMerge > 0 {
+				// r == rownum, c == colnum
+				mc := xlsxMergeCell{}
+				start := fmt.Sprintf("%s%d", numericToLetters(c), r+1)
+				endcol := c + cell.HMerge
+				endrow := r + cell.VMerge + 1
+				end := fmt.Sprintf("%s%d", numericToLetters(endcol), endrow)
+				mc.Ref = start + ":" + end
+				if worksheet.MergeCells == nil {
+					worksheet.MergeCells = &xlsxMergeCells{}
+				}
+				worksheet.MergeCells.Cells = append(worksheet.MergeCells.Cells, mc)
+			}
+		}
+	}
+	return xRow
 }
 
 func handleStyleForXLSX(style *Style, NumFmtId int, styles *xlsxStyleSheet) (XfId int) {

@@ -14,7 +14,7 @@ will expand slowly, but in the meantime patches are welcome!
 
 ** Full API docs
 The full API docs can be viewed using go's built in documentation
-tool, or online at godoc.org for the [[http://godoc.org/github.com/tealeg/xlsx][xlsx]] and  [[http://godoc.org/github.com/tealeg/xlsx/stream][stream]] packages.
+tool, or online at godoc.org for the [[http://godoc.org/github.com/tealeg/xlsx][xlsx]] and [[http://godoc.org/github.com/tealeg/xlsx/stream][stream]] packages.
 
 ** Basic Usage
 *** Reading XLSX files
@@ -92,13 +92,17 @@ func main() {
 #+END_SRC
 
 *** Stream Writing XLSX files
-This library also supports stream writing to XLSX files.  This feature is new, and is not yet feature complete. To use:  
-1. Create a StreamFileBuilder with NewStreamFileBuilder() or NewStreamFileBuilderForPath().  
-2. Add the sheets and their first row of data by calling AddSheet().  
-3. Call Build() to get a StreamFile. Once built, all functions on the builder will return an error.  
-4. Write to the StreamFile with WriteRow(). Writes begin on the first sheet. New rows are always written and flushed to the io. All rows written to the same sheet must have the same number of cells as the header provided when the sheet was created or an error will be returned.  
-5. Call NextSheet() to proceed to the next sheet. Once NextSheet() is called, the previous sheet can not be edited.  
-6. Call Close() to finish.  
+This library also supports stream writing to XLSX files.  This feature is new, and is not yet feature complete. Also the
+API of these classes are still subject to breaking change as new features are added.
+To use:
+1. Create a StreamFileBuilder with NewStreamFileBuilder() or NewStreamFileBuilderForPath().
+2. The most commonly used strings in the spreadsheet data may be passed into AddSharedStrings() as an optimization. (Optional)
+3. Add the sheets and their first row of data by calling AddSheet().
+4. Call Build() to get a StreamFile. Once built, all functions on the builder will return an error.
+5. Write to the StreamFile with WriteRow(). Writes begin on the first sheet. New rows are always written and flushed to the io.
+All rows written to the same sheet must have the same number of cells as the header provided when the sheet was created or an error will be returned.
+6. Call NextSheet() to proceed to the next sheet. Once NextSheet() is called, the previous sheet can not be edited.
+7. Call Close() to finish.
 
 #+BEGIN_SRC go
 
@@ -108,7 +112,7 @@ import (
     "fmt"
     "io"
     "os"
-    "github.com/tealeg/xlsx/stream"
+    "github.com/tealeg/xlsx"
 )
 
 func main() {
@@ -125,24 +129,24 @@ func main() {
 }
 
 func streamWriteFile(writer io.Writer) error {
-    var fileBuilder *stream.StreamFileBuilder
-    var file *stream.StreamFile
+    var streamFileBuilder *xlsx.StreamFileBuilder
+    var streamFile *xlsx.StreamFile
     var err error
 
-    fileBuilder = stream.NewStreamFileBuilder(writer)
-    err = fileBuilder.AddSheet("Sheet1", []string{"Header 1", "Header 2"})
+    streamFileBuilder = xlsx.NewStreamFileBuilder(writer)
+    err = streamFileBuilder.AddSheet("Sheet1", []string{"Header 1", "Header 2"})
     if err != nil {
         return err
     }
-    file, err = fileBuilder.Build()
+    streamFile, err = streamFileBuilder.Build()
     if err != nil {
         return err
     }
-    err = file.WriteRow([]string{"I am cell A2", "I am cell B2"})
+    err = streamFile.WriteRow([]string{"I am cell A2", "I am cell B2"})
     if err != nil {
         return err
     }
-    err = file.Close()
+    err = streamFile.Close()
     if err != nil {
         return err
     }
@@ -159,11 +163,21 @@ If you'd like to propose a change please ensure the following:
 - All existing tests are passing.
 - There are tests in the test suite that cover the changes you're making.
 - You have added documentation strings (in English) to (at least) the public functions you've added or modified.
-- Your use of, or creation of, XML is compliant with [[http://www.ecma-international.org/publications/standards/Ecma-376.htm][part 1 of the 4th edition of the ECMA-376 Standard for Office Open XML]].
+- Your use of, or creation of, XML is compliant with
+[[http://www.ecma-international.org/publications/standards/Ecma-376.htm][part 1 of the 4th edition of the ECMA-376 Standard for Office Open XML]].
 
-In `TestXlsxStreamWrite` in [[https://github.com/tealeg/xlsx/stream/stream_test.go][stream/stream_test.go]] there is a flag called `shouldMakeRealFiles`. When set to true the test will make XLSX files in the file system instead of in memory. This is useful to ensure files open in Excel, Numbers, Google Docs, etc.
+In `TestXlsxStreamWrite` in [[https://github.com/tealeg/xlsx/stream/stream_test.go][stream/stream_test.go]] there is a
+flag called `TestsShouldMakeRealFiles`. When set to true the test will make XLSX files in the file system instead of in
+memory. This is useful to ensure files open in Excel, Numbers, Google Docs, etc.
 
-If the generated XLSX files are not opening correctly you can use [[https://www.microsoft.com/en-us/download/details.aspx?id=30425][Open XML SDK 2.5]] to diagnose issues in generated XLSX files. This tool only works in Windows. If you would like to use it on other systems you can install [[https://www.virtualbox.org/][VirtualBox]] and download a [[https://developer.microsoft.com/en-us/microsoft-edge/tools/vms/][Windows VM]] from Microsoft. These VMs are released by Microsoft for compatiblity testing. The VMs expire after 90 days, so once you get the VM set up how you want, take a snapshot with VirtualBox so that you can roll back when the VM expires (The Microsoft support docs themselves will tell you to do this). The Windows VM comes in a zip that cannot be opend by macOS Archive Utility, you will need [[https://itunes.apple.com/us/app/the-unarchiver/id425424353?mt=12][The Unarchiver]] from the Mac App Store.
+If the generated XLSX files are not opening correctly you can use [[https://www.microsoft.com/en-us/download/details.aspx?id=30425][Open XML SDK 2.5]]
+to diagnose issues in generated XLSX files. This tool only works in Windows. If you would like to use it on other systems
+you can install [[https://www.virtualbox.org/][VirtualBox]] and download a [[https://developer.microsoft.com/en-us/microsoft-edge/tools/vms/][Windows VM]]
+from Microsoft. These VMs are released by Microsoft for compatiblity testing. The VMs expire after 90 days, so once you
+get the VM set up how you want, take a snapshot with VirtualBox so that you can roll back when the VM expires (The
+Microsoft support docs themselves will tell you to do this). The Windows VM comes in a zip that cannot be opend by macOS
+Archive Utility, you will need [[https://itunes.apple.com/us/app/the-unarchiver/id425424353?mt=12][The Unarchiver]] from
+the Mac App Store.
 
 ** License
 This code is under a BSD style license:

@@ -1,4 +1,4 @@
-package stream
+package xlsx
 
 import (
 	"archive/zip"
@@ -6,16 +6,15 @@ import (
 	"errors"
 	"io"
 	"strconv"
-
-	"github.com/tealeg/xlsx"
 )
 
 type StreamFile struct {
-	xlsxFile       *xlsx.File
+	file           *File
 	sheetXmlPrefix []string
 	sheetXmlSuffix []string
 	zipWriter      *zip.Writer
 	currentSheet   *streamSheet
+	refTable       *RefTable
 	err            error
 }
 
@@ -73,35 +72,23 @@ func (sf *StreamFile) write(cells []string) error {
 		return WrongNumberOfRowsError
 	}
 	sf.currentSheet.rowCount++
-	if err := sf.currentSheet.write(`<row r="` + strconv.Itoa(sf.currentSheet.rowCount) + `">`); err != nil {
+	row := &Row{Cells:make([]*Cell, len(cells))}
+
+	for colIndex, cellData := range cells {
+		cell := NewCell(row)
+		row.Cells[colIndex] = cell
+		cell.SetString(cellData)
+		// Empty cells can be omitted.
+		if cellData == "" {
+			continue
+		}
+	}
+	xRow := makeXLSXRowForStreaming(sf.currentSheet.rowCount-1, row, sf.refTable)
+	rowBytes, err := xml.Marshal(xRow)
+	if err != nil {
 		return err
 	}
-	for colIndex, cellData := range cells {
-		// documentation for the c.t (cell.Type) attribute:
-		// b (Boolean): Cell containing a boolean.
-		// d (Date): Cell contains a date in the ISO 8601 format.
-		// e (Error): Cell containing an error.
-		// inlineStr (Inline String): Cell containing an (inline) rich string, i.e., one not in the shared string table.
-		// If this cell type is used, then the cell value is in the is element rather than the v element in the cell (c element).
-		// n (Number): Cell containing a number.
-		// s (Shared String): Cell containing a shared string.
-		// str (String): Cell containing a formula string.
-		cellCoordinate := xlsx.GetCellIDStringFromCoords(colIndex, sf.currentSheet.rowCount-1)
-		cellType := "inlineStr"
-		cellOpen := `<c r="` + cellCoordinate + `" t="` + cellType + `"><is><t>`
-		cellClose := `</t></is></c>`
-
-		if err := sf.currentSheet.write(cellOpen); err != nil {
-			return err
-		}
-		if err := xml.EscapeText(sf.currentSheet.writer, []byte(cellData)); err != nil {
-			return err
-		}
-		if err := sf.currentSheet.write(cellClose); err != nil {
-			return err
-		}
-	}
-	if err := sf.currentSheet.write(`</row>`); err != nil {
+	if err := sf.currentSheet.write(string(rowBytes)); err != nil {
 		return err
 	}
 	return sf.zipWriter.Flush()
@@ -126,7 +113,7 @@ func (sf *StreamFile) NextSheet() error {
 	}
 	var sheetIndex int
 	if sf.currentSheet != nil {
-		if sf.currentSheet.index >= len(sf.xlsxFile.Sheets) {
+		if sf.currentSheet.index >= len(sf.file.Sheets) {
 			sf.err = AlreadyOnLastSheetError
 			return AlreadyOnLastSheetError
 		}
@@ -140,7 +127,7 @@ func (sf *StreamFile) NextSheet() error {
 	sheetIndex++
 	sf.currentSheet = &streamSheet{
 		index:       sheetIndex,
-		columnCount: len(sf.xlsxFile.Sheets[sheetIndex-1].Cols),
+		columnCount: len(sf.file.Sheets[sheetIndex-1].Cols),
 		rowCount:    1,
 	}
 	sheetPath := sheetFilePathPrefix + strconv.Itoa(sf.currentSheet.index) + sheetFilePathSuffix
@@ -151,7 +138,7 @@ func (sf *StreamFile) NextSheet() error {
 	// library from streaming with in an XLSX sheet.
 	// Store uses no compression and is just a no-op wrapper. Using this will allow data passed to Write to get written
 	// and then immediately flushed out to the network.
-	fileWriter, err := sf.zipWriter.CreateHeader(&zip.FileHeader{Name: sheetPath, Method: zip.Store})
+	fileWriter, err := sf.zipWriter.Create(sheetPath)
 	if err != nil {
 		sf.err = err
 		return err
@@ -174,7 +161,7 @@ func (sf *StreamFile) Close() error {
 	// If there are sheets that have not been written yet, call NextSheet() which will add files to the zip for them.
 	// XLSX readers may error if the sheets registered in the metadata are not present in the file.
 	if sf.currentSheet != nil {
-		for sf.currentSheet.index < len(sf.xlsxFile.Sheets) {
+		for sf.currentSheet.index < len(sf.file.Sheets) {
 			if err := sf.NextSheet(); err != nil {
 				sf.err = err
 				return err
@@ -186,14 +173,29 @@ func (sf *StreamFile) Close() error {
 			return err
 		}
 	}
-	err := sf.zipWriter.Close()
+
+	xSST := sf.refTable.makeXLSXSST()
+	sharedStringsXML, err := marshalFullFile(xSST)
+	if err != nil {
+		return err
+	}
+	metadataFile, err := sf.zipWriter.Create(sharedStringsFilePath)
+	if err != nil {
+		return err
+	}
+	_, err = metadataFile.Write([]byte(sharedStringsXML))
+	if err != nil {
+		return err
+	}
+
+	err = sf.zipWriter.Close()
 	if err != nil {
 		sf.err = err
 	}
 	return err
 }
 
-// writeSheetStart will write the start of the Sheet's XML as returned from the xlsx package.
+// writeSheetStart will write the start of the Sheet's XML
 func (sf *StreamFile) writeSheetStart() error {
 	if sf.currentSheet == nil {
 		return NoCurrentSheetError
@@ -201,7 +203,7 @@ func (sf *StreamFile) writeSheetStart() error {
 	return sf.currentSheet.write(sf.sheetXmlPrefix[sf.currentSheet.index-1])
 }
 
-// writeSheetEnd will write the end of the Sheet's XML as returned from the xlsx package.
+// writeSheetEnd will write the end of the Sheet's XML
 func (sf *StreamFile) writeSheetEnd() error {
 	if sf.currentSheet == nil {
 		return NoCurrentSheetError

@@ -60,6 +60,8 @@ func (rt *RefTable) ResolveSharedString(index int) string {
 // numeric index.  If the string already exists then it simply returns
 // the existing index.
 func (rt *RefTable) AddString(str string) int {
+	// If we are reading a file, we want to always add strings to the indexedStrings array, even if they are duplicates
+	// because these strings can be references by either index.
 	if rt.isWrite {
 		index, ok := rt.knownStrings[str]
 		if ok {

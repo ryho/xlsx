@@ -25,6 +25,10 @@ type File struct {
 	DefinedNames   []*xlsxDefinedName
 }
 
+const (
+	sharedStringsFilePath = "xl/sharedStrings.xml"
+)
+
 // Create a new File
 func NewFile() *File {
 	return &File{
@@ -195,21 +199,28 @@ func replaceRelationshipsNameSpace(workbookMarshal string) string {
 // Construct a map of file name to XML content representing the file
 // in terms of the structure of an XLSX file.
 func (f *File) MarshallParts() (map[string]string, error) {
+	return f.marshallPartsInternal(NewSharedStringRefTable(), false)
+}
+
+func (f *File) MarshallPartsForStreaming(refTable *RefTable) (map[string]string, error) {
+	return f.marshallPartsInternal(refTable, true)
+}
+
+func marshalFullFile(thing interface{}) (string, error) {
+	body, err := xml.Marshal(thing)
+	if err != nil {
+		return "", err
+	}
+	return xml.Header + string(body), nil
+}
+
+func (f *File) marshallPartsInternal(refTable *RefTable, marshallingForStreaming bool) (map[string]string, error) {
 	var parts map[string]string
-	var refTable *RefTable = NewSharedStringRefTable()
 	refTable.isWrite = true
 	var workbookRels WorkBookRels = make(WorkBookRels)
 	var err error
 	var workbook xlsxWorkbook
 	var types xlsxTypes = MakeDefaultContentTypes()
-
-	marshal := func(thing interface{}) (string, error) {
-		body, err := xml.Marshal(thing)
-		if err != nil {
-			return "", err
-		}
-		return xml.Header + string(body), nil
-	}
 
 	parts = make(map[string]string)
 	workbook = f.makeWorkbook()
@@ -220,10 +231,12 @@ func (f *File) MarshallParts() (map[string]string, error) {
 	}
 	f.styles.reset()
 	if len(f.Sheets) == 0 {
-		err := errors.New("Workbook must contains atleast one worksheet")
+		err := errors.New("Workbook must contain at least one worksheet")
 		return nil, err
 	}
 	for _, sheet := range f.Sheets {
+		// If we are marshalling for streaming, we don't know the full size of the sheets yet and can't write the dimension
+		sheet.omitDimension = marshallingForStreaming
 		xSheet := sheet.makeXLSXSheet(refTable, f.styles)
 		rId := fmt.Sprintf("rId%d", sheetIndex)
 		sheetId := strconv.Itoa(sheetIndex)
@@ -240,14 +253,14 @@ func (f *File) MarshallParts() (map[string]string, error) {
 			SheetId: sheetId,
 			Id:      rId,
 			State:   "visible"}
-		parts[partName], err = marshal(xSheet)
+		parts[partName], err = marshalFullFile(xSheet)
 		if err != nil {
 			return parts, err
 		}
 		sheetIndex++
 	}
 
-	workbookMarshal, err := marshal(workbook)
+	workbookMarshal, err := marshalFullFile(workbook)
 	if err != nil {
 		return parts, err
 	}
@@ -263,20 +276,23 @@ func (f *File) MarshallParts() (map[string]string, error) {
 	parts["docProps/core.xml"] = TEMPLATE_DOCPROPS_CORE
 	parts["xl/theme/theme1.xml"] = TEMPLATE_XL_THEME_THEME
 
-	xSST := refTable.makeXLSXSST()
-	parts["xl/sharedStrings.xml"], err = marshal(xSST)
-	if err != nil {
-		return parts, err
+	// If we are marshalling for streaming, don't include the shared strings file, because it will be added to as rows are written.
+	if !marshallingForStreaming {
+		xSST := refTable.makeXLSXSST()
+		parts[sharedStringsFilePath], err = marshalFullFile(xSST)
+		if err != nil {
+			return parts, err
+		}
 	}
 
 	xWRel := workbookRels.MakeXLSXWorkbookRels()
 
-	parts["xl/_rels/workbook.xml.rels"], err = marshal(xWRel)
+	parts["xl/_rels/workbook.xml.rels"], err = marshalFullFile(xWRel)
 	if err != nil {
 		return parts, err
 	}
 
-	parts["[Content_Types].xml"], err = marshal(types)
+	parts["[Content_Types].xml"], err = marshalFullFile(types)
 	if err != nil {
 		return parts, err
 	}
